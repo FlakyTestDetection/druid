@@ -28,21 +28,27 @@ import com.alibaba.druid.sql.dialect.mysql.ast.MySqlPrimaryKey;
 import com.alibaba.druid.sql.dialect.mysql.ast.MySqlUnique;
 import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlTableIndex;
 import com.alibaba.druid.sql.visitor.SQLASTVisitor;
+import com.alibaba.druid.util.FNVUtils;
 import com.alibaba.druid.util.ListDG;
 import com.alibaba.druid.util.lang.Consumer;
+import oracle.sql.SQLUtil;
 
-public class SQLCreateTableStatement extends SQLStatementImpl implements SQLDDLStatement {
+public class SQLCreateTableStatement extends SQLStatementImpl implements SQLDDLStatement, SQLCreateStatement {
 
-    protected boolean            ifNotExiists = false;
-    protected Type               type;
-    protected SQLExprTableSource tableSource;
+    protected boolean               ifNotExiists = false;
+    protected Type                  type;
+    protected SQLExprTableSource    tableSource;
 
     protected List<SQLTableElement> tableElementList = new ArrayList<SQLTableElement>();
 
     // for postgresql
-    private SQLExprTableSource inherits;
+    private SQLExprTableSource      inherits;
 
-    protected SQLSelect select;
+    protected SQLSelect             select;
+
+    protected SQLExpr               comment;
+
+    protected SQLExprTableSource     like;
 
     public SQLCreateTableStatement(){
 
@@ -50,6 +56,17 @@ public class SQLCreateTableStatement extends SQLStatementImpl implements SQLDDLS
 
     public SQLCreateTableStatement(String dbType){
         super(dbType);
+    }
+
+    public SQLExpr getComment() {
+        return comment;
+    }
+
+    public void setComment(SQLExpr comment) {
+        if (comment != null) {
+            comment.setParent(this);
+        }
+        this.comment = comment;
     }
 
     public SQLName getName() {
@@ -145,6 +162,21 @@ public class SQLCreateTableStatement extends SQLStatementImpl implements SQLDDLS
         this.select = select;
     }
 
+    public SQLExprTableSource getLike() {
+        return like;
+    }
+
+    public void setLike(SQLName like) {
+        this.setLike(new SQLExprTableSource(like));
+    }
+
+    public void setLike(SQLExprTableSource like) {
+        if (like != null) {
+            like.setParent(this);
+        }
+        this.like = like;
+    }
+
     @Override
     protected void accept0(SQLASTVisitor visitor) {
         if (visitor.visit(this)) {
@@ -203,13 +235,20 @@ public class SQLCreateTableStatement extends SQLStatementImpl implements SQLDDLS
     }
 
     public SQLColumnDefinition findColumn(String columName) {
-        columName = SQLUtils.normalize(columName);
+        if (columName == null) {
+            return null;
+        }
 
+        long hash = FNVUtils.fnv_64_lower_normalized(columName);
+        return findColumn(hash);
+    }
+
+    public SQLColumnDefinition findColumn(long columName_hash) {
         for (SQLTableElement element : tableElementList) {
             if (element instanceof SQLColumnDefinition) {
                 SQLColumnDefinition column = (SQLColumnDefinition) element;
-                String name = column.computeAlias();
-                if (columName.equalsIgnoreCase(name)) {
+                SQLName columnName = column.getName();
+                if (columnName != null && columnName.name_hash_lower() == columName_hash) {
                     return column;
                 }
             }
@@ -545,14 +584,7 @@ public class SQLCreateTableStatement extends SQLStatementImpl implements SQLDDLS
             SQLIdentifierExpr identExpr = (SQLIdentifierExpr) name;
             String tableName = identExpr.getName();
             tableName = SQLUtils.normalize(tableName, dbType);
-            identExpr.setName(tableName);
-        }
-
-        if (name instanceof SQLIdentifierExpr) {
-            SQLIdentifierExpr identExpr = (SQLIdentifierExpr) name;
-            String tableName = identExpr.getName();
-            tableName = SQLUtils.normalize(tableName);
-            identExpr.setName(tableName);
+            setName(tableName);
         }
 
         for (SQLTableElement element : this.tableElementList) {
@@ -583,6 +615,38 @@ public class SQLCreateTableStatement extends SQLStatementImpl implements SQLDDLS
                 }
             }
         }
+        return false;
+    }
+
+    public boolean apply(SQLCommentStatement x) {
+        SQLName on = x.getOn();
+        SQLExpr comment = x.getComment();
+        if (comment == null) {
+            return false;
+        }
+
+        SQLCommentStatement.Type type = x.getType();
+        if (type == SQLCommentStatement.Type.TABLE) {
+            if (!SQLUtils.nameEquals(getName(), on)) {
+                return false;
+            }
+
+            setComment(comment.clone());
+
+            return true;
+        } else if (type == SQLCommentStatement.Type.COLUMN) {
+            SQLPropertyExpr propertyExpr = (SQLPropertyExpr) on;
+            if (!SQLUtils.nameEquals(getName(), (SQLName) propertyExpr.getOwner())) {
+                return false;
+            }
+
+            SQLColumnDefinition column = this.findColumn(propertyExpr.getName());
+            if (column != null) {
+                column.setComment(comment.clone());
+            }
+            return true;
+        }
+
         return false;
     }
 
@@ -842,11 +906,18 @@ public class SQLCreateTableStatement extends SQLStatementImpl implements SQLDDLS
         if (select != null) {
             x.setSelect(select.clone());
         }
+        if (comment != null) {
+            x.setComment(comment.clone());
+        }
     }
 
     public SQLCreateTableStatement clone() {
-        SQLCreateTableStatement x = new SQLCreateTableStatement();
+        SQLCreateTableStatement x = new SQLCreateTableStatement(dbType);
         cloneTo(x);
         return x;
+    }
+
+    public String toString() {
+        return SQLUtils.toSQLString(this, dbType);
     }
 }

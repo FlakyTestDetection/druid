@@ -24,27 +24,36 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.alibaba.druid.sql.SQLUtils;
 import com.alibaba.druid.sql.ast.*;
 import com.alibaba.druid.sql.ast.expr.*;
 import com.alibaba.druid.sql.ast.statement.*;
 import com.alibaba.druid.sql.dialect.mysql.ast.expr.MySqlExpr;
 import com.alibaba.druid.sql.dialect.mysql.visitor.MySqlASTVisitorAdapter;
+import com.alibaba.druid.sql.dialect.odps.ast.OdpsLateralViewTableSource;
 import com.alibaba.druid.sql.dialect.odps.ast.OdpsValuesTableSource;
+import com.alibaba.druid.sql.dialect.oracle.ast.expr.OracleDbLinkExpr;
 import com.alibaba.druid.sql.dialect.oracle.ast.expr.OracleExpr;
 import com.alibaba.druid.sql.dialect.postgresql.visitor.PGASTVisitorAdapter;
 import com.alibaba.druid.sql.ast.statement.SQLDeclareStatement;
+import com.alibaba.druid.sql.parser.SQLParserUtils;
+import com.alibaba.druid.sql.repository.SchemaObject;
+import com.alibaba.druid.sql.repository.SchemaRepository;
 import com.alibaba.druid.stat.TableStat;
 import com.alibaba.druid.stat.TableStat.Column;
 import com.alibaba.druid.stat.TableStat.Condition;
 import com.alibaba.druid.stat.TableStat.Mode;
 import com.alibaba.druid.stat.TableStat.Relationship;
+import com.alibaba.druid.util.FNVUtils;
 import com.alibaba.druid.util.JdbcConstants;
 import com.alibaba.druid.util.StringUtils;
 
 public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
+    protected SchemaRepository repository;
+
     protected final HashMap<TableStat.Name, TableStat> tableStats     = new LinkedHashMap<TableStat.Name, TableStat>();
-    protected final Map<Column, Column>                columns        = new LinkedHashMap<Column, Column>();
+    protected final Map<Long, Column>                  columns        = new LinkedHashMap<Long, Column>();
     protected final List<Condition>                    conditions     = new ArrayList<Condition>();
     protected final Set<Relationship>                  relationships  = new LinkedHashSet<Relationship>();
     protected final List<Column>                       orderByColumns = new ArrayList<Column>();
@@ -67,12 +76,35 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
     private Mode mode;
 
+    protected String dbType;
+
     public SchemaStatVisitor(){
-        this(new ArrayList<Object>());
+        this((String) null);
+    }
+
+    public SchemaStatVisitor(String dbType){
+        this(new SchemaRepository(dbType), new ArrayList<Object>());
+        this.dbType = dbType;
     }
 
     public SchemaStatVisitor(List<Object> parameters){
+        this((String) null, parameters);
+    }
+
+    public SchemaStatVisitor(String dbType, List<Object> parameters){
+        this(new SchemaRepository(dbType), parameters);
         this.parameters = parameters;
+    }
+
+    public SchemaStatVisitor(SchemaRepository repository, List<Object> parameters){
+        this.repository = repository;
+        this.parameters = parameters;
+        if (repository != null) {
+            String dbType = repository.getDbType();
+            if (dbType != null && this.dbType == null) {
+                this.dbType = dbType;
+            }
+        }
     }
 
     public List<Object> getParameters() {
@@ -87,14 +119,18 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
         return getTableStat(ident, null);
     }
 
-    public Column addColumn(String tableName, String columnName) {
-        tableName = handleName(tableName);
-        columnName = handleName(columnName);
+    protected Column addColumn(String tableName, String columnName) {
+        return addColumn(tableName, columnName, 0, 0);
+    }
+
+    protected Column addColumn(String tableName, String columnName, long table_hash, long name_hash) {
+//        tableName = handleName(tableName);
+//        columnName = handleName(columnName);
 
         Column column = this.getColumn(tableName, columnName);
         if (column == null && columnName != null) {
             column = new Column(tableName, columnName);
-            columns.put(column, column);
+            columns.put(column.hashCode64(), column);
         }
         return column;
     }
@@ -178,28 +214,6 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
         return aliasMap;
     }
     
-    public void setCurrentTable(String table) {
-        this.currentTable = table;
-    }
-
-    public void setCurrentTable(SQLObject x) {
-        x.putAttribute("_old_local_", this.currentTable);
-    }
-
-    public void restoreCurrentTable(SQLObject x) {
-        String table = (String) x.getAttribute("_old_local_");
-        this.currentTable = table;
-    }
-
-    public void setCurrentTable(SQLObject x, String table) {
-        x.putAttribute("_old_local_", this.currentTable);
-        this.currentTable = table;
-    }
-
-    public String getCurrentTable() {
-        return currentTable;
-    }
-
     protected Mode getMode() {
         return mode;
     }
@@ -217,6 +231,74 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     }
 
     private boolean visitOrderBy(SQLIdentifierExpr x) {
+        SQLTableSource tableSource = x.getResolvedTableSource();
+
+        String tableName = null;
+        if (tableSource instanceof SQLExprTableSource) {
+            SQLExpr expr = ((SQLExprTableSource) tableSource).getExpr();
+            if (expr instanceof SQLIdentifierExpr) {
+                SQLIdentifierExpr table = (SQLIdentifierExpr) expr;
+                tableName = table.getName();
+            } else if (expr instanceof SQLPropertyExpr) {
+                SQLPropertyExpr table = (SQLPropertyExpr) expr;
+                tableName = table.toString();
+            } else if (expr instanceof SQLMethodInvokeExpr) {
+                SQLMethodInvokeExpr methodInvokeExpr = (SQLMethodInvokeExpr) expr;
+                if ("table".equalsIgnoreCase(methodInvokeExpr.getMethodName())
+                        && methodInvokeExpr.getParameters().size() == 1
+                        && methodInvokeExpr.getParameters().get(0) instanceof SQLName) {
+                    SQLName table = (SQLName) methodInvokeExpr.getParameters().get(0);
+
+                    if (table instanceof SQLPropertyExpr) {
+                        SQLPropertyExpr propertyExpr = (SQLPropertyExpr) table;
+                        SQLIdentifierExpr owner = (SQLIdentifierExpr) propertyExpr.getOwner();
+                        if (propertyExpr.getResolvedTableSource() != null
+                                && propertyExpr.getResolvedTableSource() instanceof SQLExprTableSource) {
+                            SQLExpr resolveExpr = ((SQLExprTableSource) propertyExpr.getResolvedTableSource()).getExpr();
+                            if (resolveExpr instanceof SQLName) {
+                                tableName = resolveExpr.toString() + "." + propertyExpr.getName();
+                            }
+                        }
+                    }
+
+                    if (tableName == null) {
+                        tableName = table.toString();
+                    }
+                }
+            }
+        } else if (tableSource instanceof SQLWithSubqueryClause.Entry
+                || tableSource instanceof SQLSubqueryTableSource) {
+            SQLTableSource xx = tableSource.findTableSourceWithColumn(x.name_hash_lower());
+            if (xx != null) {
+
+            }
+            // skip
+        } else {
+            boolean skip = false;
+            for (SQLObject parent = x.getParent();parent != null;parent = parent.getParent()) {
+                if (parent instanceof SQLSelectQueryBlock) {
+                    SQLTableSource from = ((SQLSelectQueryBlock) parent).getFrom();
+
+                    if (from instanceof OdpsValuesTableSource) {
+                        skip = true;
+                        break;
+                    }
+                } else if (parent instanceof SQLSelectQuery) {
+                    break;
+                }
+            }
+        }
+
+        String identName = x.getName();
+        if (tableName != null) {
+            orderByAddColumn(tableName, identName, x);
+        } else {
+            orderByAddColumn("UNKOWN", identName, x);
+        }
+        return false;
+    }
+
+    private boolean visitOrderBy1(SQLIdentifierExpr x) {
         if (containsSubQuery(currentTable)) {
             return false;
         }
@@ -533,7 +615,7 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     }
 
     public String getDbType() {
-        return null;
+        return dbType;
     }
 
     protected Column getColumn(SQLExpr expr) {
@@ -555,8 +637,9 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
         }
 
         if (expr instanceof SQLPropertyExpr) {
-            SQLExpr owner = ((SQLPropertyExpr) expr).getOwner();
-            String column = ((SQLPropertyExpr) expr).getName();
+            SQLPropertyExpr propertyExpr = (SQLPropertyExpr) expr;
+            SQLExpr owner = propertyExpr.getOwner();
+            String column = propertyExpr.getName();
 
             if (owner instanceof SQLIdentifierExpr) {
                 String tableName = ((SQLIdentifierExpr) owner).getName();
@@ -565,6 +648,10 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
                 
                 if (aliasMap.containsKey(tableNameLower)) {
                     table = aliasMap.get(tableNameLower);
+                }
+
+                if (propertyExpr.getResolvedTableSource() instanceof SQLSubqueryTableSource) {
+                    table = null;
                 }
                 
                 if (containsSubQuery(tableNameLower)) {
@@ -587,16 +674,30 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
         if (expr instanceof SQLIdentifierExpr) {
             SQLIdentifierExpr identifierExpr = (SQLIdentifierExpr) expr;
-            if (isParam(identifierExpr)) {
+            if (identifierExpr.getResolvedParameter() != null) {
                 return null;
             }
+
+            if (identifierExpr.getResolvedTableSource() instanceof SQLSubqueryTableSource) {
+                return null;
+            }
+
             Column attrColumn = (Column) expr.getAttribute(ATTR_COLUMN);
             if (attrColumn != null) {
                 return attrColumn;
             }
 
             String column = identifierExpr.getName();
-            String table = getCurrentTable();
+
+            String table = null;
+            SQLTableSource tableSource = identifierExpr.getResolvedTableSource();
+            if (tableSource instanceof SQLExprTableSource) {
+                SQLName tableName = ((SQLExprTableSource) tableSource).getName();
+                if (tableName != null) {
+                    table = tableName.toString();
+                }
+            }
+
             if (table != null && aliasMap.containsKey(table)) {
                 table = aliasMap.get(table);
                 if (table == null) {
@@ -624,14 +725,10 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
         setAliasMap();
 
-        String originalTable = getCurrentTable();
-
         for (SQLExprTableSource tableSource : x.getTableSources()) {
             SQLName name = (SQLName) tableSource.getExpr();
 
             String ident = name.toString();
-            setCurrentTable(ident);
-            x.putAttribute("_old_local_", originalTable);
 
             TableStat stat = getTableStat(ident);
             stat.incrementDeleteCount();
@@ -655,13 +752,9 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
         setAliasMap();
 
-        String originalTable = getCurrentTable();
-
         for (SQLExprTableSource tableSource : x.getTableSources()) {
             SQLName name = (SQLName) tableSource.getExpr();
             String ident = name.toString();
-            setCurrentTable(ident);
-            x.putAttribute("_old_local_", originalTable);
 
             TableStat stat = getTableStat(ident);
             stat.incrementDropCount();
@@ -675,16 +768,17 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
     @Override
     public boolean visit(SQLInsertStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         setMode(x, Mode.Insert);
 
         setAliasMap();
 
-        String originalTable = getCurrentTable();
-
         if (x.getTableName() instanceof SQLName) {
             String ident = ((SQLName) x.getTableName()).toString();
-            setCurrentTable(ident);
-            x.putAttribute("_old_local_", originalTable);
 
             TableStat stat = getTableStat(ident);
             stat.incrementInsertCount();
@@ -746,19 +840,15 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
             }
         }
 
-        String originalTable = getCurrentTable();
-
         if (x.getFrom() instanceof SQLExprTableSource) {
             SQLExprTableSource tableSource = (SQLExprTableSource) x.getFrom();
             if (tableSource.getExpr() instanceof SQLName) {
                 String ident = tableSource.getExpr().toString();
 
-                setCurrentTable(x, ident);
                 x.putAttribute(ATTR_TABLE, ident);
                 if (x.getParent() instanceof SQLSelect) {
                     x.getParent().putAttribute(ATTR_TABLE, ident);
                 }
-                x.putAttribute("_old_local_", originalTable);
             }
         }
 
@@ -784,40 +874,14 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     }
 
     public static boolean isParam(SQLIdentifierExpr x) {
-        if (x.isParameter() != null) {
-            return x.isParameter();
-        }
-
-        for (SQLObject parent = x.getParent(); parent != null; parent = parent.getParent()) {
-            if (parent instanceof SQLCreateProcedureStatement) {
-                SQLCreateProcedureStatement stmt = (SQLCreateProcedureStatement) parent;
-                for (SQLParameter parameter : stmt.getParameters()) {
-                    if (x.equals(parameter.getName())) {
-                        x.setParameter(true);
-                        return true;
-                    }
-                }
-                break;
-            }
-
-            if (parent instanceof SQLBlockStatement) {
-                SQLBlockStatement stmt = (SQLBlockStatement) parent;
-                for (SQLParameter parameter : stmt.getParameters()) {
-                    if (x.equals(parameter.getName())) {
-                        x.setParameter(true);
-                        return true;
-                    }
-                }
-            }
+        if (x.getResolvedParameter() != null
+                || x.getResolvedDeclareItem() != null) {
+            return true;
         }
         return false;
     }
 
     public void endVisit(SQLSelectQueryBlock x) {
-        String originalTable = (String) x.getAttribute("_old_local_");
-        x.putAttribute("table", getCurrentTable());
-        setCurrentTable(originalTable);
-
         setModeOrigin(x);
     }
 
@@ -832,29 +896,129 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     }
 
     public boolean visit(SQLPropertyExpr x) {
-        if (x.getOwner() instanceof SQLIdentifierExpr) {
-            String owner = ((SQLIdentifierExpr) x.getOwner()).getName();
+        return visit1(x);
+//        return visit2(x);
+    }
 
-            if (containsSubQuery(owner)) {
+    public boolean visit1(SQLPropertyExpr x) {
+        Column column = null;
+        String ident = x.getName();
+
+        SQLTableSource tableSource = x.getResolvedTableSource();
+        if (tableSource instanceof SQLExprTableSource) {
+            SQLExpr expr = ((SQLExprTableSource) tableSource).getExpr();
+
+            if (expr instanceof SQLIdentifierExpr) {
+                SQLIdentifierExpr table = (SQLIdentifierExpr) expr;
+                SQLTableSource resolvedTableSource = table.getResolvedTableSource();
+                if (resolvedTableSource instanceof SQLExprTableSource) {
+                    expr = ((SQLExprTableSource) resolvedTableSource).getExpr();
+                }
+            } else if (expr instanceof SQLPropertyExpr) {
+                SQLPropertyExpr table = (SQLPropertyExpr) expr;
+                SQLTableSource resolvedTableSource = table.getResolvedTableSource();
+                if (resolvedTableSource instanceof SQLExprTableSource) {
+                    expr = ((SQLExprTableSource) resolvedTableSource).getExpr();
+                }
+            }
+
+            if (expr instanceof SQLIdentifierExpr) {
+                SQLIdentifierExpr table = (SQLIdentifierExpr) expr;
+
+                SQLTableSource resolvedTableSource = table.getResolvedTableSource();
+                if (resolvedTableSource instanceof SQLWithSubqueryClause.Entry) {
+                    return false;
+                }
+
+                column = addColumn(table.getName(), ident, table.name_hash_lower(), x.name_hash_lower());
+
+                if (column != null && isParentGroupBy(x)) {
+                    this.groupByColumns.add(column);
+                }
+                x.putAttribute(ATTR_COLUMN, column);
+            } else if (expr instanceof SQLPropertyExpr) {
+                SQLPropertyExpr table = (SQLPropertyExpr) expr;
+                String tableName = table.toString();
+                column = addColumn(tableName, ident, 0, x.name_hash_lower());
+
+                if (column != null && isParentGroupBy(x)) {
+                    this.groupByColumns.add(column);
+                }
+                x.putAttribute(ATTR_COLUMN, column);
+            } else if (expr instanceof SQLMethodInvokeExpr) {
+                SQLMethodInvokeExpr methodInvokeExpr = (SQLMethodInvokeExpr) expr;
+                if ("table".equalsIgnoreCase(methodInvokeExpr.getMethodName())
+                        && methodInvokeExpr.getParameters().size() == 1
+                        && methodInvokeExpr.getParameters().get(0) instanceof SQLName) {
+                    SQLName table = (SQLName) methodInvokeExpr.getParameters().get(0);
+
+                    String tableName = null;
+                    if (table instanceof SQLPropertyExpr) {
+                        SQLPropertyExpr propertyExpr = (SQLPropertyExpr) table;
+                        SQLIdentifierExpr owner = (SQLIdentifierExpr) propertyExpr.getOwner();
+                        if (propertyExpr.getResolvedTableSource() != null
+                                && propertyExpr.getResolvedTableSource() instanceof SQLExprTableSource) {
+                            SQLExpr resolveExpr = ((SQLExprTableSource) propertyExpr.getResolvedTableSource()).getExpr();
+                            if (resolveExpr instanceof SQLName) {
+                                tableName = resolveExpr.toString() + "." + propertyExpr.getName();
+                            }
+                        }
+                    }
+
+                    if (tableName == null) {
+                        tableName = table.toString();
+                    }
+
+                    column = addColumn(tableName, ident, 0, x.name_hash_lower());
+                }
+            }
+        } else if (tableSource instanceof SQLWithSubqueryClause.Entry
+                || tableSource instanceof SQLSubqueryTableSource) {
+            return false;
+        } else if (tableSource instanceof SQLUnionQueryTableSource) {
+            return false;
+        } else if (tableSource instanceof OdpsLateralViewTableSource) {
+            return false;
+        } else {
+            if (x.getResolvedProcudure() != null) {
                 return false;
             }
 
-            owner = aliasWrap(owner);
+            boolean skip = false;
+            for (SQLObject parent = x.getParent();parent != null;parent = parent.getParent()) {
+                if (parent instanceof SQLSelectQueryBlock) {
+                    SQLTableSource from = ((SQLSelectQueryBlock) parent).getFrom();
 
-            if (owner != null) {
-                Column column = addColumn(owner, x.getName());
-                x.putAttribute(ATTR_COLUMN, column);
-                if (column != null) {
-                    if (isParentGroupBy(x)) {
-                        this.groupByColumns.add(column);
+                    if (from instanceof OdpsValuesTableSource) {
+                        skip = true;
+                        break;
                     }
-                    
-                    if (column != null) {
-                        setColumn(x, column);
-                    }
+                } else if (parent instanceof SQLSelectQuery) {
+                    break;
                 }
             }
+            if (!skip) {
+                column = handleUnkownColumn(ident);
+            }
+            if (column != null) {
+                x.putAttribute(ATTR_COLUMN, column);
+            }
         }
+
+        if (column != null) {
+            SQLObject parent = x.getParent();
+            if (parent instanceof SQLSelectOrderByItem) {
+                parent = parent.getParent();
+            }
+            if (parent instanceof SQLPrimaryKey) {
+                column.setPrimaryKey(true);
+            } else if (parent instanceof SQLUnique) {
+                column.setUnique(true);
+            }
+
+            setColumn(x, column);
+        }
+
         return false;
     }
 
@@ -997,42 +1161,96 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     }
 
     public boolean visit(SQLIdentifierExpr x) {
+        return visit1(x);
+    }
+
+    public boolean isPseudoColumn(long hash) {
+        return false;
+    }
+
+    public boolean visit1(SQLIdentifierExpr x) {
         if (isParam(x)) {
             return false;
         }
 
-        String currentTable = getCurrentTable();
-
-        if (containsSubQuery(currentTable)) {
-            return false;
-        }
-
-        String ident = x.toString();
-
-        if (variants.containsKey(ident)) {
-            return false;
-        }
-
-        if ("LEVEL".equalsIgnoreCase(ident) || "CONNECT_BY_ISCYCLE".equalsIgnoreCase(ident)) {
-            for (SQLObject parent = x.getParent(); parent != null; parent = parent.getParent()) {
-                if (parent instanceof SQLSelectQueryBlock) {
-                    SQLSelectQueryBlock queryBlock = (SQLSelectQueryBlock) parent;
-                    if (queryBlock.getStartWith() != null || queryBlock.getConnectBy() != null) {
-                        return false;
-                    }
-                    break;
-                }
+        SQLTableSource tableSource = x.getResolvedTableSource();
+        if (x.getParent() instanceof SQLSelectOrderByItem) {
+            SQLSelectOrderByItem selectOrderByItem = (SQLSelectOrderByItem) x.getParent();
+            if (selectOrderByItem.getResolvedSelectItem() != null) {
+                return false;
             }
+        }
+
+        if (tableSource == null
+                && (x.getResolvedParameter() != null
+                    || x.getResolvedDeclareItem() != null))
+        {
+            return false;
+        }
+
+        long hash = x.name_hash_lower();
+        if (isPseudoColumn(hash)) {
+            return false;
+        }
+
+        if ((hash == FNVUtils.LEVEL || hash == FNVUtils.CONNECT_BY_ISCYCLE)
+                && x.getResolvedColumn() == null
+                && tableSource == null) {
+            return false;
         }
 
         Column column = null;
-        if (currentTable != null) {
-            column = addColumn(currentTable, ident);
-            
-            if (column != null && isParentGroupBy(x)) {
-                this.groupByColumns.add(column);
+        String ident = x.getName();
+
+        if (tableSource instanceof SQLExprTableSource) {
+            SQLExpr expr = ((SQLExprTableSource) tableSource).getExpr();
+            if (expr instanceof SQLIdentifierExpr) {
+                SQLIdentifierExpr table = (SQLIdentifierExpr) expr;
+                column = addColumn(table.getName(), ident, table.name_hash_lower(), hash);
+
+                if (column != null && isParentGroupBy(x)) {
+                    this.groupByColumns.add(column);
+                }
+                x.putAttribute(ATTR_COLUMN, column);
+            } else if (expr instanceof SQLPropertyExpr || expr instanceof OracleDbLinkExpr) {
+                String tableName = expr.toString();
+                column = addColumn(tableName, ident, 0, hash);
+
+                if (column != null && isParentGroupBy(x)) {
+                    this.groupByColumns.add(column);
+                }
+                x.putAttribute(ATTR_COLUMN, column);
+            } else if (expr instanceof SQLMethodInvokeExpr) {
+                SQLMethodInvokeExpr methodInvokeExpr = (SQLMethodInvokeExpr) expr;
+                if ("table".equalsIgnoreCase(methodInvokeExpr.getMethodName())
+                        && methodInvokeExpr.getParameters().size() == 1
+                        && methodInvokeExpr.getParameters().get(0) instanceof SQLName) {
+                    SQLName table = (SQLName) methodInvokeExpr.getParameters().get(0);
+
+                    String tableName = null;
+                    if (table instanceof SQLPropertyExpr) {
+                        SQLPropertyExpr propertyExpr = (SQLPropertyExpr) table;
+                        SQLIdentifierExpr owner = (SQLIdentifierExpr) propertyExpr.getOwner();
+                        if (propertyExpr.getResolvedTableSource() != null
+                                && propertyExpr.getResolvedTableSource() instanceof SQLExprTableSource) {
+                            SQLExpr resolveExpr = ((SQLExprTableSource) propertyExpr.getResolvedTableSource()).getExpr();
+                            if (resolveExpr instanceof SQLName) {
+                                tableName = resolveExpr.toString() + "." + propertyExpr.getName();
+                            }
+                        }
+                    }
+
+                    if (tableName == null) {
+                        tableName = table.toString();
+                    }
+
+                    column = addColumn(tableName, ident, 0, x.name_hash_lower());
+                }
             }
-            x.putAttribute(ATTR_COLUMN, column);
+        } else if (tableSource instanceof SQLWithSubqueryClause.Entry
+                || tableSource instanceof SQLSubqueryTableSource
+                || tableSource instanceof OdpsLateralViewTableSource) {
+            return false;
         } else {
             boolean skip = false;
             for (SQLObject parent = x.getParent();parent != null;parent = parent.getParent()) {
@@ -1054,6 +1272,7 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
                 x.putAttribute(ATTR_COLUMN, column);
             }
         }
+
         if (column != null) {
             SQLObject parent = x.getParent();
             if (parent instanceof SQLSelectOrderByItem) {
@@ -1067,9 +1286,10 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
             setColumn(x, column);
         }
+
         return false;
     }
-    
+
     private boolean isParentSelectItem(SQLObject parent) {
         if (parent == null) {
             return false;
@@ -1147,25 +1367,43 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     }
 
     public boolean visit(SQLAllColumnExpr x) {
-        String currentTable = getCurrentTable();
+        SQLTableSource tableSource = x.getResolvedTableSource();
 
-        if (containsSubQuery(currentTable)) {
-            return false;
-        }
-        
-        if (x.getParent() instanceof SQLAggregateExpr) {
-            SQLAggregateExpr aggregateExpr = (SQLAggregateExpr) x.getParent();
-            if ("count".equalsIgnoreCase(aggregateExpr.getMethodName())) {
-                return false;
+        if (tableSource instanceof SQLExprTableSource) {
+            SQLExprTableSource exprTableSource = (SQLExprTableSource) tableSource;
+            SQLName expr = exprTableSource.getName();
+
+            SQLCreateTableStatement createStmt = null;
+
+            SchemaObject tableObject = exprTableSource.getSchemaObject();
+            if (tableObject != null) {
+                SQLStatement stmt = tableObject.getStatement();
+                if (stmt instanceof SQLCreateTableStatement) {
+                    createStmt = (SQLCreateTableStatement) stmt;
+                }
+            }
+
+            if (createStmt != null
+                    && createStmt.getTableElementList().size() > 0) {
+                SQLName tableName = createStmt.getName();
+                for (SQLTableElement e : createStmt.getTableElementList()) {
+                    if (e instanceof SQLColumnDefinition) {
+                        SQLColumnDefinition columnDefinition = (SQLColumnDefinition) e;
+                        SQLName columnName = columnDefinition.getName();
+                        Column column = addColumn(tableName.toString(), columnName.toString(), tableName.hashCode64(), columnName.hashCode64());
+                        if (isParentSelectItem(x.getParent())) {
+                            column.setSelec(true);
+                        }
+                    }
+                }
+            } else if (expr != null) {
+                Column column = addColumn(expr.toString(), "*");
+                if (isParentSelectItem(x.getParent())) {
+                    column.setSelec(true);
+                }
             }
         }
 
-        if (currentTable != null) {
-            Column column = addColumn(currentTable, "*");
-            if (isParentSelectItem(x.getParent())) {
-                column.setSelec(true);
-            }
-        }
         return false;
     }
 
@@ -1178,7 +1416,16 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     }
 
     public boolean containsColumn(String tableName, String columnName) {
-        return columns.containsKey(new Column(tableName, columnName));
+        long hashCode;
+
+        int p = tableName.indexOf('.');
+        if (p != -1) {
+            SQLExpr owner = SQLUtils.toSQLExpr(tableName, dbType);
+            hashCode = FNVUtils.fnv_64_lower(new SQLPropertyExpr(owner, columnName));
+        } else {
+            hashCode = FNVUtils.fnv_64_lower(tableName, columnName);
+        }
+        return columns.containsKey(hashCode);
     }
 
     public Collection<Column> getColumns() {
@@ -1192,10 +1439,15 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
         
         Column column = new Column(tableName, columnName);
         
-        return this.columns.get(column);
+        return this.columns.get(column.hashCode64());
     }
 
     public boolean visit(SQLSelectStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         setAliasMap();
         return true;
     }
@@ -1205,7 +1457,7 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
     @Override
     public boolean visit(SQLWithSubqueryClause.Entry x) {
-        String alias = x.getName().toString();
+        String alias = x.getAlias();
         Map<String, String> aliasMap = getAliasMap();
         SQLWithSubqueryClause with = (SQLWithSubqueryClause) x.getParent();
 
@@ -1213,16 +1465,26 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
             if (aliasMap != null && alias != null) {
                 putAliasMap(aliasMap, alias, null);
-                addSubQuery(alias, x.getSubQuery().getQuery());
+                addSubQuery(alias, x);
             }
 
-            x.getSubQuery().accept(this);
+            SQLSelect select = x.getSubQuery();
+            if (select != null) {
+                select.accept(this);
+            } else {
+                x.getReturningStatement().accept(this);
+            }
         } else {
-            x.getSubQuery().accept(this);
+            SQLSelect select = x.getSubQuery();
+            if (select != null) {
+                select.accept(this);
+            } else {
+                x.getReturningStatement().accept(this);
+            }
 
             if (aliasMap != null && alias != null) {
                 putAliasMap(aliasMap, alias, null);
-                addSubQuery(alias, x.getSubQuery().getQuery());
+                addSubQuery(alias, x);
             }
         }
 
@@ -1349,12 +1611,9 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     }
 
     public void endVisit(SQLSelect x) {
-        restoreCurrentTable(x);
     }
 
     public boolean visit(SQLSelect x) {
-        setCurrentTable(x);
-
         if (x.getOrderBy() != null) {
             x.getOrderBy().setParent(x);
         }
@@ -1362,14 +1621,8 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
         accept(x.getWithSubQuery());
         accept(x.getQuery());
 
-        String originalTable = getCurrentTable();
-
-        setCurrentTable((String) x.getQuery().getAttribute("table"));
-        x.putAttribute("_old_local_", originalTable);
-
         accept(x.getOrderBy());
 
-        setCurrentTable(originalTable);
 
         return false;
     }
@@ -1391,6 +1644,10 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     }
 
     public boolean visit(SQLUpdateStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
         setAliasMap();
 
         setMode(x, Mode.Update);
@@ -1399,7 +1656,6 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
         if (tableSource instanceof SQLExprTableSource) {
             SQLName identName = ((SQLExprTableSource) tableSource).getName();
             String ident = identName.toString();
-            setCurrentTable(ident);
 
             TableStat stat = getTableStat(ident);
             stat.incrementUpdateCount();
@@ -1419,12 +1675,16 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     }
 
     public boolean visit(SQLDeleteStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         setAliasMap();
 
         setMode(x, Mode.Delete);
 
         String tableName = x.getTableName().toString();
-        setCurrentTable(tableName);
 
         if (x.getAlias() != null) {
             putAliasMap(this.aliasMap, x.getAlias(), tableName);
@@ -1474,6 +1734,11 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     }
 
     public boolean visit(SQLCreateTableStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         for (SQLTableElement e : x.getTableElementList()) {
             e.setParent(x);
         }
@@ -1482,11 +1747,8 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
         TableStat stat = getTableStat(tableName);
         stat.incrementCreateCount();
-        setCurrentTable(x, tableName);
 
         accept(x.getTableElementList());
-
-        restoreCurrentTable(x);
 
         if (x.getInherits() != null) {
             x.getInherits().accept(this);
@@ -1571,6 +1833,11 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     }
 
     public boolean visit(SQLCreateViewStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         x.getSubQuery().accept(this);
         return false;
     }
@@ -1597,11 +1864,15 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
     @Override
     public boolean visit(SQLAlterTableStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         String tableName = x.getName().toString();
         TableStat stat = getTableStat(tableName);
         stat.incrementAlterCount();
 
-        setCurrentTable(x, tableName);
 
         for (SQLAlterTableItem item : x.getItems()) {
             item.setParent(x);
@@ -1624,7 +1895,6 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
             SQLName name = (SQLName) table.getExpr();
 
             String ident = name.toString();
-            setCurrentTable(ident);
 
             TableStat stat = getTableStat(ident);
             stat.incrementDropIndexCount();
@@ -1642,7 +1912,6 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
         SQLName name = (SQLName) ((SQLExprTableSource) x.getTable()).getExpr();
 
         String table = name.toString();
-        setCurrentTable(table);
 
         TableStat stat = getTableStat(table);
         stat.incrementCreateIndexCount();
@@ -1670,7 +1939,6 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
         }
 
         String table = x.getReferencedTableName().getSimpleName();
-        setCurrentTable(table);
 
         TableStat stat = getTableStat(table);
         stat.incrementReferencedCount();
@@ -1787,6 +2055,11 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
     @Override
     public boolean visit(SQLCreateProcedureStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         String name = x.getName().toString();
         this.variants.put(name, x);
         accept(x.getBlock());
@@ -1795,6 +2068,11 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
     @Override
     public boolean visit(SQLCreateFunctionStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         String name = x.getName().toString();
         this.variants.put(name, x);
         accept(x.getBlock());
@@ -1803,6 +2081,11 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     
     @Override
     public boolean visit(SQLBlockStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         for (SQLParameter param : x.getParameters()) {
             param.setParent(x);
 
@@ -1940,9 +2223,12 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     
     @Override
     public boolean visit(SQLMergeStatement x) {
-        setAliasMap();
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
 
-        String originalTable = getCurrentTable();
+        setAliasMap();
 
         setMode(x.getUsing(), Mode.Select);
         x.getUsing().accept(this);
@@ -1950,8 +2236,6 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
         setMode(x, Mode.Merge);
 
         String ident = x.getInto().toString();
-        setCurrentTable(x, ident);
-        x.putAttribute("_old_local_", originalTable);
 
         TableStat stat = getTableStat(ident);
         stat.incrementMergeCount();
@@ -2049,6 +2333,11 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
     }
 
     public boolean visit(SQLExplainStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         if (x.getStatement() != null) {
             accept(x.getStatement());
         }
@@ -2063,6 +2352,14 @@ public class SchemaStatVisitor extends SQLASTVisitorAdapter {
 
             SQLExpr name = item.getName();
             this.variants.put(name.toString(), name);
+        }
+        return true;
+    }
+
+    public boolean visit(SQLCreateMaterializedViewStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
         }
         return true;
     }

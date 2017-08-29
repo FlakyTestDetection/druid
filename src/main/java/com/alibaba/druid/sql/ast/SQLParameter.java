@@ -20,9 +20,9 @@ import com.alibaba.druid.sql.visitor.SQLASTVisitor;
 import java.util.ArrayList;
 import java.util.List;
 
-public class SQLParameter extends SQLObjectImpl {
+public class SQLParameter extends SQLObjectImpl implements SQLObjectWithDataType {
 
-    private SQLExpr       name;
+    private SQLName       name;
     private SQLDataType   dataType;
     private SQLExpr       defaultValue;
     private ParameterType paramType;
@@ -43,11 +43,11 @@ public class SQLParameter extends SQLObjectImpl {
         this.defaultValue = deaultValue;
     }
 
-    public SQLExpr getName() {
+    public SQLName getName() {
         return name;
     }
 
-    public void setName(SQLExpr name) {
+    public void setName(SQLName name) {
         if (name != null) {
             name.setParent(this);
         }
@@ -59,6 +59,9 @@ public class SQLParameter extends SQLObjectImpl {
     }
 
     public void setDataType(SQLDataType dataType) {
+        if (dataType != null) {
+            dataType.setParent(this);
+        }
         this.dataType = dataType;
     }
     

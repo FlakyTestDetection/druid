@@ -17,11 +17,16 @@ package com.alibaba.druid.sql.dialect.mysql.ast.expr;
 
 import com.alibaba.druid.sql.ast.SQLName;
 import com.alibaba.druid.sql.dialect.mysql.visitor.MySqlASTVisitor;
+import com.alibaba.druid.util.FNVUtils;
 
 public class MySqlUserName extends MySqlExprImpl implements SQLName, Cloneable {
 
     private String userName;
     private String host;
+
+    protected transient long userName_hash;
+
+    protected long hashCode64;
 
     public String getUserName() {
         return userName;
@@ -29,6 +34,9 @@ public class MySqlUserName extends MySqlExprImpl implements SQLName, Cloneable {
 
     public void setUserName(String userName) {
         this.userName = userName;
+
+        hashCode64 = 0;
+        userName_hash = 0;
     }
 
     public String getHost() {
@@ -37,6 +45,9 @@ public class MySqlUserName extends MySqlExprImpl implements SQLName, Cloneable {
 
     public void setHost(String host) {
         this.host = host;
+
+        hashCode64 = 0;
+        userName_hash = 0;
     }
 
     @Override
@@ -58,5 +69,42 @@ public class MySqlUserName extends MySqlExprImpl implements SQLName, Cloneable {
         x.userName = userName;
         x.host = host;
         return x;
+    }
+
+    public long name_hash_lower() {
+        if (userName_hash == 0
+                && userName != null) {
+            final int len = userName.length();
+
+            boolean quote = false;
+
+            String name = this.userName;
+            if (len > 2) {
+                char c0 = name.charAt(0);
+                char c1 = name.charAt(len - 1);
+                if (c0 == c1
+                        && (c0 == '`' || c1 == '"')) {
+                    quote = true;
+                }
+            }
+            if (quote) {
+                userName_hash = FNVUtils.fnv_64_lower(name, 1, len -1);
+            } else {
+                userName_hash = FNVUtils.fnv_64_lower(name);
+            }
+        }
+        return userName_hash;
+    }
+
+    @Override
+    public long hashCode64() {
+        if (hashCode64 == 0) {
+            if (host != null) {
+                hashCode64 = FNVUtils.fnv_64_lower(host, userName);
+            } else {
+                hashCode64 = name_hash_lower();
+            }
+        }
+        return hashCode64;
     }
 }

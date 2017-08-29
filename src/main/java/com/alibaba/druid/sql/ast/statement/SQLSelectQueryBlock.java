@@ -20,11 +20,10 @@ import java.util.List;
 
 import com.alibaba.druid.sql.SQLUtils;
 import com.alibaba.druid.sql.ast.*;
-import com.alibaba.druid.sql.ast.expr.SQLBinaryOpExpr;
-import com.alibaba.druid.sql.ast.expr.SQLIdentifierExpr;
-import com.alibaba.druid.sql.ast.expr.SQLIntegerExpr;
+import com.alibaba.druid.sql.ast.expr.*;
 import com.alibaba.druid.sql.repository.SchemaObject;
 import com.alibaba.druid.sql.visitor.SQLASTVisitor;
+import com.alibaba.druid.util.FNVUtils;
 
 public class SQLSelectQueryBlock extends SQLObjectImpl implements SQLSelectQuery, SQLReplaceable {
     private boolean                     bracket         = false;
@@ -50,6 +49,9 @@ public class SQLSelectQueryBlock extends SQLObjectImpl implements SQLSelectQuery
     protected SQLExpr                   waitTime;
 
     protected SQLLimit                  limit;
+
+    // for oracle
+    protected List<SQLExpr>            forUpdateOf;
 
     public SQLSelectQueryBlock(){
 
@@ -312,6 +314,7 @@ public class SQLSelectQueryBlock extends SQLObjectImpl implements SQLSelectQuery
         if (visitor.visit(this)) {
             acceptChild(visitor, this.selectList);
             acceptChild(visitor, this.from);
+            acceptChild(visitor, this.into);
             acceptChild(visitor, this.where);
             acceptChild(visitor, this.startWith);
             acceptChild(visitor, this.connectBy);
@@ -367,6 +370,21 @@ public class SQLSelectQueryBlock extends SQLObjectImpl implements SQLSelectQuery
         SQLSelectQueryBlock x = new SQLSelectQueryBlock();
         cloneTo(x);
         return x;
+    }
+
+    public List<SQLExpr> getForUpdateOf() {
+        if (forUpdateOf == null) {
+            forUpdateOf = new ArrayList<SQLExpr>(1);
+        }
+        return forUpdateOf;
+    }
+
+    public int getForUpdateOfSize() {
+        if (forUpdateOf == null) {
+            return 0;
+        }
+
+        return forUpdateOf.size();
     }
 
     public void cloneTo(SQLSelectQueryBlock x) {
@@ -435,7 +453,10 @@ public class SQLSelectQueryBlock extends SQLObjectImpl implements SQLSelectQuery
     }
 
     public SQLTableSource findTableSource(String alias) {
-        return findTableSource(from, alias);
+        if (from == null) {
+            return null;
+        }
+        return from.findTableSource(alias);
     }
 
     public SQLTableSource findTableSourceWithColumn(String column) {
@@ -445,30 +466,11 @@ public class SQLSelectQueryBlock extends SQLObjectImpl implements SQLSelectQuery
         return from.findTableSourceWithColumn(column);
     }
 
-    private static SQLTableSource findTableSource(SQLTableSource from, String alias) {
-        if (from == null || alias == null) {
+    public SQLTableSource findTableSourceWithColumn(long columnHash) {
+        if (from == null) {
             return null;
         }
-
-        if (alias.equalsIgnoreCase(from.computeAlias())) {
-            return from;
-        }
-
-        if (from instanceof SQLJoinTableSource) {
-            SQLJoinTableSource join = (SQLJoinTableSource) from;
-            SQLTableSource result = findTableSource(join.getLeft(), alias);
-            if (result != null) {
-                return result;
-            }
-
-            return findTableSource(join.getRight(), alias);
-        }
-
-        if (from instanceof SQLExprTableSource && from.containsAlias(alias)) {
-            return from;
-        }
-
-        return null;
+        return from.findTableSourceWithColumn(columnHash);
     }
 
     @Override
@@ -485,10 +487,13 @@ public class SQLSelectQueryBlock extends SQLObjectImpl implements SQLSelectQuery
             return null;
         }
 
-        String ident_normalized = SQLUtils.normalize(ident);
+        long hash = FNVUtils.fnv_64_lower_normalized(ident);
+        return findSelectItem(hash);
+    }
 
+    public SQLSelectItem findSelectItem(long identHash) {
         for (SQLSelectItem item : this.selectList) {
-            if (item.match(ident_normalized)) {
+            if (item.match(identHash)) {
                 return item;
             }
         }
@@ -496,12 +501,35 @@ public class SQLSelectQueryBlock extends SQLObjectImpl implements SQLSelectQuery
         return null;
     }
 
+    public boolean selectItemHashAllColumn() {
+        for (SQLSelectItem item : this.selectList) {
+            SQLExpr expr = item.getExpr();
+
+            boolean allColumn = expr instanceof SQLAllColumnExpr
+                    || (expr instanceof SQLPropertyExpr && ((SQLPropertyExpr) expr).getName().equals("*"));
+
+            if (allColumn) {
+                if (from instanceof SQLSubqueryTableSource) {
+                    SQLSelect subSelect = ((SQLSubqueryTableSource) from).select;
+                    SQLSelectQueryBlock queryBlock = subSelect.getQueryBlock();
+                    if (queryBlock != null) {
+                        return queryBlock.selectItemHashAllColumn();
+                    }
+                }
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public SQLColumnDefinition findColumn(String columnName) {
         if (from == null) {
             return null;
         }
 
-        return from.findColumn(columnName);
+        long hash = FNVUtils.fnv_64_lower_normalized(columnName);
+        return from.findColumn(hash);
     }
 
     public void addCondition(SQLExpr expr) {

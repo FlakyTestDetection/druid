@@ -21,10 +21,15 @@ import com.alibaba.druid.sql.ast.statement.*;
 import com.alibaba.druid.sql.dialect.odps.ast.*;
 import com.alibaba.druid.sql.visitor.SchemaStatVisitor;
 import com.alibaba.druid.stat.TableStat;
+import com.alibaba.druid.util.JdbcConstants;
 
 import java.util.Map;
 
 public class OdpsSchemaStatVisitor extends SchemaStatVisitor implements OdpsASTVisitor {
+
+    public OdpsSchemaStatVisitor() {
+        super(JdbcConstants.ODPS);
+    }
 
     @Override
     public void endVisit(OdpsCreateTableStatement x) {
@@ -43,6 +48,10 @@ public class OdpsSchemaStatVisitor extends SchemaStatVisitor implements OdpsASTV
 
     @Override
     public boolean visit(OdpsInsertStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
         return true;
     }
 
@@ -62,7 +71,6 @@ public class OdpsSchemaStatVisitor extends SchemaStatVisitor implements OdpsASTV
 
         if (tableName instanceof SQLName) {
             String ident = ((SQLName) tableName).toString();
-            setCurrentTable(ident);
 
             TableStat stat = getTableStat(ident);
             stat.incrementInsertCount();

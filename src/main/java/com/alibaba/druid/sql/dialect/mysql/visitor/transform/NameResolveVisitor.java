@@ -30,7 +30,8 @@ public class NameResolveVisitor extends OracleASTVisitorAdapter {
     public boolean visit(SQLIdentifierExpr x) {
         SQLObject parent = x.getParent();
 
-        if (parent instanceof SQLBinaryOpExpr) {
+        if (parent instanceof SQLBinaryOpExpr
+                && x.getResolvedColumn() == null) {
             SQLBinaryOpExpr binaryOpExpr = (SQLBinaryOpExpr) parent;
             boolean isJoinCondition = binaryOpExpr.getLeft() instanceof SQLName
                     && binaryOpExpr.getRight() instanceof SQLName;
@@ -95,7 +96,7 @@ public class NameResolveVisitor extends OracleASTVisitorAdapter {
                     continue;
                 }
 
-                String alias = tableSource.getAlias();
+                String alias = tableSource.computeAlias();
                 if (tableSource != null
                         && ownerName.equalsIgnoreCase(alias)
                         && !ownerName.equals(alias)) {

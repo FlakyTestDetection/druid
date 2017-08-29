@@ -63,6 +63,7 @@ import com.alibaba.druid.stat.TableStat;
 import com.alibaba.druid.stat.TableStat.Column;
 import com.alibaba.druid.stat.TableStat.Mode;
 import com.alibaba.druid.stat.TableStat.Relationship;
+import com.alibaba.druid.util.JdbcConstants;
 import com.alibaba.druid.util.JdbcUtils;
 
 public class OracleSchemaStatVisitor extends SchemaStatVisitor implements OracleASTVisitor {
@@ -72,16 +73,11 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
     }
 
     public OracleSchemaStatVisitor(List<Object> parameters){
-        super(parameters);
+        super(JdbcConstants.ORACLE, parameters);
         this.variants.put("DUAL", null);
         this.variants.put("NOTFOUND", null);
         this.variants.put("TRUE", null);
         this.variants.put("FALSE", null);
-    }
-
-    @Override
-    public String getDbType() {
-        return JdbcUtils.ORACLE;
     }
 
     protected Column getColumn(SQLExpr expr) {
@@ -168,10 +164,14 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
                 x.putAttribute(ATTR_TABLE, table);
             }
         }
-        restoreCurrentTable(x);
     }
 
     public boolean visit(OracleUpdateStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         setAliasMap();
         setMode(x, Mode.Update);
 
@@ -184,7 +184,6 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
 
         if (tableExpr instanceof SQLName) {
             String ident = tableExpr.toString();
-            setCurrentTable(ident);
 
             TableStat stat = getTableStat(ident);
             stat.incrementUpdateCount();
@@ -213,10 +212,6 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
     }
 
     public boolean visit(OracleSelectQueryBlock x) {
-        if (x.getWhere() != null) {
-            x.getWhere().setParent(x);
-        }
-
         if (x.getInto() instanceof SQLName) {
             String tableName = x.getInto().toString();
             TableStat stat = getTableStat(tableName);
@@ -434,7 +429,6 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
                 this.aliasMap.put(x.getAlias(), table);
             }
             addSubQuery(x.getAlias(), x.getSelect());
-            this.setCurrentTable(x.getAlias());
         }
 
         if (table != null) {
@@ -479,10 +473,7 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
     public boolean visit(OracleWithSubqueryEntry x) {
         Map<String, String> aliasMap = getAliasMap();
         if (aliasMap != null) {
-            String alias = null;
-            if (x.getName() != null) {
-                alias = x.getName().toString();
-            }
+            String alias = x.getAlias();
 
             if (alias != null) {
                 putAliasMap(aliasMap, alias, null);
@@ -707,7 +698,6 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
 
         if (x.getTableName() instanceof SQLName) {
             String ident = ((SQLName) x.getTableName()).toString();
-            setCurrentTable(x, ident);
 
             TableStat stat = getTableStat(ident);
             stat.incrementInsertCount();
@@ -736,17 +726,17 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
 
     @Override
     public boolean visit(OracleMultiInsertStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         x.putAttribute("_original_use_mode", getMode());
         setMode(x, Mode.Insert);
 
         setAliasMap();
 
         accept(x.getSubQuery());
-
-        for (OracleMultiInsertStatement.Entry entry : x.getEntries()) {
-            entry.setParent(x);
-        }
-
         accept(x.getEntries());
 
         return false;
@@ -759,12 +749,6 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
 
     @Override
     public boolean visit(ConditionalInsertClause x) {
-        for (ConditionalInsertClauseItem item : x.getItems()) {
-            item.setParent(x);
-        }
-        if (x.getElseItem() != null) {
-            x.getElseItem().setParent(x);
-        }
         return true;
     }
 
@@ -781,14 +765,9 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
         }
         if (parent instanceof OracleMultiInsertStatement) {
             SQLSelect subQuery = ((OracleMultiInsertStatement) parent).getSubQuery();
-            if (subQuery != null) {
-                String table = (String) subQuery.getAttribute("_table_");
-                setCurrentTable(x, table);
-            }
         }
         x.getWhen().accept(this);
         x.getThen().accept(this);
-        restoreCurrentTable(x);
         return false;
     }
 
@@ -947,7 +926,6 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
 
     @Override
     public void endVisit(SQLAlterTableStatement x) {
-        restoreCurrentTable(x);
     }
 
     @Override
@@ -1016,7 +994,6 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
 
     @Override
     public void endVisit(OracleCreateIndexStatement x) {
-        restoreCurrentTable(x);
     }
 
     @Override
@@ -1031,8 +1008,6 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
 
     @Override
     public boolean visit(OracleForStatement x) {
-        x.getRange().setParent(x);
-
         SQLName index = x.getIndex();
         this.getVariants().put(index.toString(), x);
 
@@ -1375,7 +1350,15 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
 
     @Override
     public boolean visit(OracleCreatePackageStatement x) {
-        return true;
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
+        for (SQLStatement stmt : x.getStatements()) {
+            stmt.accept(this);
+        }
+        return false;
     }
 
     @Override
@@ -1443,6 +1426,16 @@ public class OracleSchemaStatVisitor extends SchemaStatVisitor implements Oracle
 
     @Override
     public void endVisit(OracleTreatExpr x) {
+
+    }
+
+    @Override
+    public boolean visit(OracleCreateSynonymStatement x) {
+        return false;
+    }
+
+    @Override
+    public void endVisit(OracleCreateSynonymStatement x) {
 
     }
 }

@@ -19,16 +19,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.alibaba.druid.sql.SQLUtils;
-import com.alibaba.druid.sql.ast.SQLDataType;
-import com.alibaba.druid.sql.ast.SQLExpr;
-import com.alibaba.druid.sql.ast.SQLName;
-import com.alibaba.druid.sql.ast.SQLObjectImpl;
+import com.alibaba.druid.sql.ast.*;
+import com.alibaba.druid.sql.ast.expr.SQLCharExpr;
 import com.alibaba.druid.sql.ast.expr.SQLIdentifierExpr;
 import com.alibaba.druid.sql.ast.expr.SQLPropertyExpr;
 import com.alibaba.druid.sql.visitor.SQLASTVisitor;
 import com.alibaba.druid.util.JdbcConstants;
 
-public class SQLColumnDefinition extends SQLObjectImpl implements SQLTableElement {
+public class SQLColumnDefinition extends SQLObjectImpl implements SQLTableElement, SQLObjectWithDataType {
     protected String                          dbType;
 
     protected SQLName                         name;
@@ -171,7 +169,14 @@ public class SQLColumnDefinition extends SQLObjectImpl implements SQLTableElemen
         return comment;
     }
 
+    public void setComment(String comment) {
+        this.setComment(new SQLCharExpr(comment));
+    }
+
     public void setComment(SQLExpr comment) {
+        if (comment != null) {
+            comment.setParent(this);
+        }
         this.comment = comment;
     }
 
@@ -375,7 +380,7 @@ public class SQLColumnDefinition extends SQLObjectImpl implements SQLTableElemen
             SQLIdentifierExpr identExpr = (SQLIdentifierExpr) this.name;
             String columnName = identExpr.getName();
             columnName = SQLUtils.normalize(columnName, dbType);
-            identExpr.setName(columnName);
+            this.setName(columnName);
         }
     }
 

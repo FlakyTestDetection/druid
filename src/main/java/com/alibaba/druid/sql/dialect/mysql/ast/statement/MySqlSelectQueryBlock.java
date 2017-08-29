@@ -18,12 +18,14 @@ package com.alibaba.druid.sql.dialect.mysql.ast.statement;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.alibaba.druid.sql.SQLUtils;
 import com.alibaba.druid.sql.ast.*;
 import com.alibaba.druid.sql.ast.statement.SQLSelectQueryBlock;
 import com.alibaba.druid.sql.dialect.mysql.ast.MySqlObject;
 import com.alibaba.druid.sql.dialect.mysql.visitor.MySqlASTVisitor;
 import com.alibaba.druid.sql.dialect.oracle.ast.stmt.OracleSelectQueryBlock;
 import com.alibaba.druid.sql.visitor.SQLASTVisitor;
+import oracle.sql.SQLUtil;
 
 public class MySqlSelectQueryBlock extends SQLSelectQueryBlock implements MySqlObject {
 
@@ -115,10 +117,6 @@ public class MySqlSelectQueryBlock extends SQLSelectQueryBlock implements MySqlO
             procedureArgumentList = new ArrayList<SQLExpr>(2);
         }
         return procedureArgumentList;
-    }
-
-    public void setProcedureArgumentList(List<SQLExpr> procedureArgumentList) {
-        this.procedureArgumentList = procedureArgumentList;
     }
 
     public boolean isHignPriority() {
@@ -260,4 +258,7 @@ public class MySqlSelectQueryBlock extends SQLSelectQueryBlock implements MySqlO
         visitor.endVisit(this);
     }
 
+    public String toString() {
+        return SQLUtils.toMySqlString(this);
+    }
 }

@@ -46,99 +46,30 @@ import com.alibaba.druid.sql.dialect.mysql.ast.expr.MySqlMatchAgainstExpr;
 import com.alibaba.druid.sql.dialect.mysql.ast.expr.MySqlOrderingExpr;
 import com.alibaba.druid.sql.dialect.mysql.ast.expr.MySqlOutFileExpr;
 import com.alibaba.druid.sql.dialect.mysql.ast.expr.MySqlUserName;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.CobarShowStatus;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableAlterColumn;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableChangeColumn;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableCharacter;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableDiscardTablespace;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableImportTablespace;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableModifyColumn;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableOption;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterUserStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAnalyzeStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlBinlogStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
+import com.alibaba.druid.sql.dialect.mysql.ast.statement.*;
 import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement.TableSpaceOption;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlCreateUserStatement;
 import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlCreateUserStatement.UserSpecification;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlDeleteStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlExecuteStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlExplainStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlHelpStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlHintStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlInsertStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlKillStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlLoadDataInFileStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlLoadXmlStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlLockTableStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlOptimizeStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlPartitionByKey;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlPrepareStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlReplaceStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlResetStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlSelectQueryBlock;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlSetPasswordStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlSetTransactionStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowAuthorsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowBinLogEventsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowBinaryLogsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowCharacterSetStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowCollationStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowColumnsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowContributorsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowCreateDatabaseStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowCreateEventStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowCreateFunctionStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowCreateProcedureStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowCreateTableStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowCreateTriggerStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowCreateViewStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowDatabasesStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowEngineStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowEnginesStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowErrorsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowEventsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowFunctionCodeStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowFunctionStatusStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowGrantsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowIndexesStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowKeysStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowMasterLogsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowMasterStatusStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowOpenTablesStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowPluginsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowPrivilegesStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowProcedureCodeStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowProcedureStatusStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowProcessListStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowProfileStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowProfilesStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowRelayLogEventsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowSlaveHostsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowSlaveStatusStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowStatusStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowTableStatusStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowTriggersStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowVariantsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlShowWarningsStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlSubPartitionByKey;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlSubPartitionByList;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlTableIndex;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlUnlockTablesStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlUpdateStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlUpdateTableSource;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MysqlDeallocatePrepareStatement;
+import com.alibaba.druid.sql.repository.SchemaRepository;
 import com.alibaba.druid.sql.visitor.SchemaStatVisitor;
 import com.alibaba.druid.stat.TableStat;
 import com.alibaba.druid.stat.TableStat.Mode;
+import com.alibaba.druid.util.JdbcConstants;
 import com.alibaba.druid.util.JdbcUtils;
 
 import java.util.Map;
 
 public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlASTVisitor {
 
+    public MySqlSchemaStatVisitor() {
+        super (JdbcConstants.MYSQL);
+    }
+
     public boolean visit(SQLSelectStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         setAliasMap();
         getAliasMap().put("DUAL", null);
 
@@ -152,6 +83,11 @@ public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlAS
 
     // DUAL
     public boolean visit(MySqlDeleteStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         setAliasMap();
 
         setMode(x, Mode.Delete);
@@ -163,7 +99,6 @@ public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlAS
         if (x.getTableSource() instanceof SQLExprTableSource) {
             SQLName tableName = (SQLName) ((SQLExprTableSource) x.getTableSource()).getExpr();
             String ident = tableName.toString();
-            setCurrentTable(x, ident);
 
             TableStat stat = this.getTableStat(ident);
             stat.incrementDeleteCount();
@@ -188,6 +123,11 @@ public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlAS
 
     @Override
     public boolean visit(MySqlInsertStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         setMode(x, Mode.Insert);
 
         setAliasMap();
@@ -205,8 +145,6 @@ public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlAS
         }
 
         if (ident != null) {
-            setCurrentTable(x, ident);
-
             TableStat stat = getTableStat(ident);
             stat.incrementInsertCount();
 
@@ -355,6 +293,11 @@ public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlAS
 
     @Override
     public boolean visit(MySqlReplaceStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         setMode(x, Mode.Replace);
 
         setAliasMap();
@@ -372,8 +315,6 @@ public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlAS
         }
 
         if (ident != null) {
-            setCurrentTable(x, ident);
-
             TableStat stat = getTableStat(ident);
             stat.incrementInsertCount();
 
@@ -532,11 +473,19 @@ public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlAS
 
     @Override
     public boolean visit(MySqlExplainStatement x) {
-        if (x.getTableName() != null) {
-            String table = x.getTableName().toString();
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
+        SQLName tableName = x.getTableName();
+        if (tableName != null) {
+            String table = tableName.toString();
             getTableStat(table);
-            if (x.getColumnName() != null) {
-                addColumn(table, x.getColumnName().toString());
+
+            SQLName columnName = x.getColumnName();
+            if (columnName != null) {
+                addColumn(table, columnName.getSimpleName(), tableName.name_hash_lower(), columnName.name_hash_lower());
             }
         }
 
@@ -554,7 +503,6 @@ public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlAS
 
     @Override
     public boolean visit(MySqlUpdateStatement x) {
-        
         visit((SQLUpdateStatement) x);
         for (SQLExpr item : x.getReturning()) {
             item.accept(this);
@@ -1041,10 +989,13 @@ public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlAS
     @Override
     public boolean visit(MySqlAlterTableChangeColumn x) {
         SQLAlterTableStatement stmt = (SQLAlterTableStatement) x.getParent();
-        String table = stmt.getName().toString();
 
-        String columnName = x.getColumnName().toString();
-        addColumn(table, columnName);
+        SQLName table = stmt.getName();
+        String tableName = table.toString();
+
+        SQLName column = x.getColumnName();
+        String columnName = column.toString();
+        addColumn(tableName, columnName, table.name_hash_lower(), column.name_hash_lower());
         return false;
     }
 
@@ -1056,10 +1007,14 @@ public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlAS
     @Override
     public boolean visit(MySqlAlterTableModifyColumn x) {
         SQLAlterTableStatement stmt = (SQLAlterTableStatement) x.getParent();
-        String table = stmt.getName().toString();
 
-        String columnName = x.getNewColumnDefinition().getName().toString();
-        addColumn(table, columnName);
+        SQLName table = stmt.getName();
+        String tableName = table.toString();
+
+        SQLName column = x.getNewColumnDefinition().getName();
+        String columnName = column.toString();
+        addColumn(tableName, columnName, table.name_hash_lower(), column.name_hash_lower());
+
         return false;
     }
 
@@ -1090,6 +1045,11 @@ public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlAS
 
     @Override
     public boolean visit(MySqlCreateTableStatement x) {
+        if (repository != null
+                && x.getParent() == null) {
+            repository.resolve(x);
+        }
+
         boolean val = super.visit((SQLCreateTableStatement) x);
 
         for (SQLObject option : x.getTableOptions().values()) {
@@ -1259,8 +1219,6 @@ public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlAS
     @Override
     public boolean visit(MySqlDeclareStatement x) {
         for (SQLDeclareItem item : x.getVarList()) {
-            item.setParent(x);
-
             SQLName var = (SQLName) item.getName();
             this.variants.put(var.toString(), var);
         }
@@ -1371,25 +1329,31 @@ public class MySqlSchemaStatVisitor extends SchemaStatVisitor implements MySqlAS
 
 	@Override
 	public boolean visit(MySqlDeclareHandlerStatement x) {
-		// TODO Auto-generated method stub
 		return false;
 	}
 
 	@Override
 	public void endVisit(MySqlDeclareHandlerStatement x) {
-		// TODO Auto-generated method stub
-		
+
 	}
 
 	@Override
 	public boolean visit(MySqlDeclareConditionStatement x) {
-		// TODO Auto-generated method stub
 		return false;
 	}
 
 	@Override
 	public void endVisit(MySqlDeclareConditionStatement x) {
-		// TODO Auto-generated method stub
-		
+
 	}
+
+    @Override
+    public boolean visit(MySqlFlushStatement x) {
+        return false;
+    }
+
+    @Override
+    public void endVisit(MySqlFlushStatement x) {
+
+    }
 }

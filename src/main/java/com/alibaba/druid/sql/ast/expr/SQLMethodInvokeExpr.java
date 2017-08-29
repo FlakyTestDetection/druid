@@ -35,6 +35,10 @@ public class SQLMethodInvokeExpr extends SQLExprImpl implements SQLReplaceable, 
     private final List<SQLExpr> parameters       = new ArrayList<SQLExpr>();
 
     private SQLExpr             from;
+    private SQLExpr             using;
+    private SQLExpr             _for;
+
+    private String              trimOption;
 
     public SQLMethodInvokeExpr(){
 
@@ -173,6 +177,10 @@ public class SQLMethodInvokeExpr extends SQLExprImpl implements SQLReplaceable, 
             x.setFrom(from.clone());
         }
 
+        if (using != null) {
+            x.setUsing(using.clone());
+        }
+
         return x;
     }
 
@@ -216,6 +224,11 @@ public class SQLMethodInvokeExpr extends SQLExprImpl implements SQLReplaceable, 
     }
 
     public SQLDataType computeDataType() {
+        if (SQLUtils.nameEquals("to_date", methodName)
+                || SQLUtils.nameEquals("add_months", methodName)) {
+            return SQLDateExpr.DEFAULT_DATA_TYPE;
+        }
+
         if (parameters.size() == 1) {
             if (SQLUtils.nameEquals("trunc", methodName)) {
                 return parameters.get(0).computeDataType();
@@ -233,5 +246,35 @@ public class SQLMethodInvokeExpr extends SQLExprImpl implements SQLReplaceable, 
             }
         }
         return null;
+    }
+
+    public SQLExpr getUsing() {
+        return using;
+    }
+
+    public void setUsing(SQLExpr using) {
+        if (using != null) {
+            using.setParent(this);
+        }
+        this.using = using;
+    }
+
+    public SQLExpr getFor() {
+        return _for;
+    }
+
+    public void setFor(SQLExpr x) {
+        if (x != null) {
+            x.setParent(this);
+        }
+        this._for = x;
+    }
+
+    public String getTrimOption() {
+        return trimOption;
+    }
+
+    public void setTrimOption(String trimOption) {
+        this.trimOption = trimOption;
     }
 }

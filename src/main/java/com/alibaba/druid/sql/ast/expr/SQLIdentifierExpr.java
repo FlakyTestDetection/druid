@@ -16,21 +16,20 @@
 package com.alibaba.druid.sql.ast.expr;
 
 import com.alibaba.druid.sql.SQLUtils;
-import com.alibaba.druid.sql.ast.SQLDataType;
-import com.alibaba.druid.sql.ast.SQLExprImpl;
-import com.alibaba.druid.sql.ast.SQLName;
+import com.alibaba.druid.sql.ast.*;
 import com.alibaba.druid.sql.ast.statement.*;
 import com.alibaba.druid.sql.visitor.SQLASTVisitor;
+import com.alibaba.druid.util.FNVUtils;
 
 public class SQLIdentifierExpr extends SQLExprImpl implements SQLName {
 
     protected String          name;
 
     private transient String  lowerName;
-    private transient Boolean parameter;
+    protected transient long hashCode64;
 
-    private transient SQLColumnDefinition resolvedColumn;
-    private transient SQLTableSource resolvedTableSource;
+    private transient SQLObject resolvedColumn;
+    private transient SQLObject resolvedOwnerObject;
 
     public SQLIdentifierExpr(){
 
@@ -38,6 +37,11 @@ public class SQLIdentifierExpr extends SQLExprImpl implements SQLName {
 
     public SQLIdentifierExpr(String name){
         this.name = name;
+    }
+
+    public SQLIdentifierExpr(String name, long hash_lower){
+        this.name = name;
+        this.hashCode64 = hash_lower;
     }
 
     public String getSimpleName() {
@@ -51,6 +55,7 @@ public class SQLIdentifierExpr extends SQLExprImpl implements SQLName {
     public void setName(String name) {
         this.name = name;
         this.lowerName = null;
+        this.hashCode64 = 0L;
     }
 
     public String getLowerName() {
@@ -60,12 +65,17 @@ public class SQLIdentifierExpr extends SQLExprImpl implements SQLName {
         return lowerName;
     }
 
-    public Boolean isParameter() {
-        return parameter;
+    public long name_hash_lower() {
+        return hashCode64();
     }
 
-    public void setParameter(Boolean parameter) {
-        this.parameter = parameter;
+    @Override
+    public long hashCode64() {
+        if (hashCode64 == 0
+                && name != null) {
+            hashCode64 = FNVUtils.fnv_64_lower_normalized(name);
+        }
+        return hashCode64;
     }
 
     public void output(StringBuffer buf) {
@@ -80,54 +90,18 @@ public class SQLIdentifierExpr extends SQLExprImpl implements SQLName {
 
     @Override
     public int hashCode() {
-        final int prime = 31;
-        int result = 1;
-        result = prime * result + ((name == null) ? 0 : name.hashCode());
-        return result;
+        long value = hashCode64();
+        return (int)(value ^ (value >>> 32));
     }
 
     @Override
     public boolean equals(Object obj) {
-        if (this == obj) {
-            return true;
-        }
-        if (obj == null) {
-            return false;
-        }
         if (!(obj instanceof SQLIdentifierExpr)) {
             return false;
         }
-        SQLIdentifierExpr other = (SQLIdentifierExpr) obj;
-        if (name == null) {
-            if (other.name != null) {
-                return false;
-            }
-        } else if (!name.equals(other.name)) {
-            return false;
-        }
-        return true;
-    }
 
-    public boolean equalsIgnoreCase(Object obj) {
-        if (this == obj) {
-            return true;
-        }
-        if (obj == null) {
-            return false;
-        }
-        if (!(obj instanceof SQLIdentifierExpr)) {
-            return false;
-        }
         SQLIdentifierExpr other = (SQLIdentifierExpr) obj;
-        if (name == null) {
-            if (other.name != null) {
-                return false;
-            }
-
-        } else if (!SQLUtils.normalize(name).equalsIgnoreCase(SQLUtils.normalize(other.name))) {
-            return false;
-        }
-        return true;
+        return this.hashCode64() == other.hashCode64();
     }
 
     public String toString() {
@@ -135,7 +109,10 @@ public class SQLIdentifierExpr extends SQLExprImpl implements SQLName {
     }
 
     public SQLIdentifierExpr clone() {
-        return new SQLIdentifierExpr(this.name);
+        SQLIdentifierExpr x = new SQLIdentifierExpr(this.name, hashCode64);
+        x.resolvedColumn = resolvedColumn;
+        x.resolvedOwnerObject = resolvedOwnerObject;
+        return x;
     }
 
     public String normalizedName() {
@@ -143,7 +120,11 @@ public class SQLIdentifierExpr extends SQLExprImpl implements SQLName {
     }
 
     public SQLColumnDefinition getResolvedColumn() {
-        return resolvedColumn;
+        if (resolvedColumn instanceof SQLColumnDefinition) {
+            return (SQLColumnDefinition) resolvedColumn;
+        }
+
+        return null;
     }
 
     public void setResolvedColumn(SQLColumnDefinition resolvedColumn) {
@@ -151,26 +132,61 @@ public class SQLIdentifierExpr extends SQLExprImpl implements SQLName {
     }
 
     public SQLTableSource getResolvedTableSource() {
-        return resolvedTableSource;
+        if (resolvedOwnerObject instanceof SQLTableSource) {
+            return (SQLTableSource) resolvedOwnerObject;
+        }
+
+        return null;
     }
 
     public void setResolvedTableSource(SQLTableSource resolvedTableSource) {
-        this.resolvedTableSource = resolvedTableSource;
+        this.resolvedOwnerObject = resolvedTableSource;
+    }
+
+    public SQLObject getResolvedOwnerObject() {
+        return resolvedOwnerObject;
+    }
+
+    public void setResolvedOwnerObject(SQLObject resolvedOwnerObject) {
+        this.resolvedOwnerObject = resolvedOwnerObject;
+    }
+
+    public SQLParameter getResolvedParameter() {
+        if (resolvedColumn instanceof SQLParameter) {
+            return (SQLParameter) this.resolvedColumn;
+        }
+        return null;
+    }
+
+    public void setResolvedParameter(SQLParameter resolvedParameter) {
+        this.resolvedColumn = resolvedParameter;
+    }
+
+    public SQLDeclareItem getResolvedDeclareItem() {
+        if (resolvedColumn instanceof SQLDeclareItem) {
+            return (SQLDeclareItem) this.resolvedColumn;
+        }
+        return null;
+    }
+
+    public void setResolvedDeclareItem(SQLDeclareItem resolvedDeclareItem) {
+        this.resolvedColumn = resolvedDeclareItem;
     }
 
     public SQLDataType computeDataType() {
+        SQLColumnDefinition resolvedColumn = getResolvedColumn();
         if (resolvedColumn != null) {
             return resolvedColumn.getDataType();
         }
 
-        if (resolvedTableSource != null
-                && resolvedTableSource instanceof SQLSubqueryTableSource) {
-            SQLSelect select = ((SQLSubqueryTableSource) resolvedTableSource).getSelect();
+        if (resolvedOwnerObject != null
+                && resolvedOwnerObject instanceof SQLSubqueryTableSource) {
+            SQLSelect select = ((SQLSubqueryTableSource) resolvedOwnerObject).getSelect();
             SQLSelectQueryBlock queryBlock = select.getFirstQueryBlock();
             if (queryBlock == null) {
                 return null;
             }
-            SQLSelectItem selectItem = queryBlock.findSelectItem(name);
+            SQLSelectItem selectItem = queryBlock.findSelectItem(name_hash_lower());
             if (selectItem != null) {
                 return selectItem.computeDataType();
             }

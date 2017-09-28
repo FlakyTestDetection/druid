@@ -16,9 +16,13 @@
 package com.alibaba.druid.sql.ast.expr;
 
 import com.alibaba.druid.sql.ast.SQLExprImpl;
+import com.alibaba.druid.sql.ast.SQLObject;
 import com.alibaba.druid.sql.visitor.SQLASTVisitor;
 
-public class SQLBinaryExpr extends SQLExprImpl implements SQLLiteralExpr {
+import java.util.Collections;
+import java.util.List;
+
+public class SQLBinaryExpr extends SQLExprImpl implements SQLLiteralExpr, SQLValuableExpr {
 
     private String value;
 
@@ -61,6 +65,11 @@ public class SQLBinaryExpr extends SQLExprImpl implements SQLLiteralExpr {
 
     public SQLBinaryExpr clone() {
         return new SQLBinaryExpr(value);
+    }
+
+    @Override
+    public List<SQLObject> getChildren() {
+        return Collections.emptyList();
     }
 
     @Override

@@ -5,6 +5,7 @@ import com.alibaba.druid.mock.MockStatementBase;
 import com.alibaba.druid.pool.DruidDataSource;
 import com.alibaba.druid.pool.ExceptionSorter;
 import com.alibaba.druid.pool.vendor.MySqlExceptionSorter;
+import com.alibaba.druid.util.JdbcUtils;
 import com.mysql.jdbc.Driver;
 import junit.framework.TestCase;
 import org.junit.Assert;
@@ -82,10 +83,14 @@ public class DruidDataSourceTest_exceptionSorter_extend extends TestCase {
      */
     public void testExceptionSorter() throws Exception {
         DruidDataSource dataSource1 = new DruidDataSource();
-        dataSource1.setDriverClassName(SubDriver.class.getName());
-        dataSource1.init();
-        Assert.assertNotNull(dataSource1.getExceptionSorter());
-        Assert.assertEquals(MySqlExceptionSorter.class.getName(), dataSource1.getExceptionSorter().getClass().getName());
+        try {
+            dataSource1.setDriverClassName(SubDriver.class.getName());
+            dataSource1.init();
+            Assert.assertNotNull(dataSource1.getExceptionSorter());
+            Assert.assertEquals(MySqlExceptionSorter.class.getName(), dataSource1.getExceptionSorter().getClass().getName());
+        } finally {
+            JdbcUtils.close(dataSource1);
+        }
     }
 
     /**
@@ -94,8 +99,13 @@ public class DruidDataSourceTest_exceptionSorter_extend extends TestCase {
      */
     public void testExceptionSorterNull() throws Exception {
         DruidDataSource dataSource1 = new DruidDataSource();
-        dataSource1.setDriverClassName(SubDriver1.class.getName());
-        dataSource1.init();
-        Assert.assertEquals("sorter is not null",null,dataSource1.getExceptionSorter());
+        try {
+            dataSource1.setDriverClassName(SubDriver1.class.getName());
+            dataSource1.init();
+            Assert.assertEquals("sorter is not null", null, dataSource1.getExceptionSorter());
+        } finally {
+            JdbcUtils.close(dataSource1);
+        }
+
     }
 }

@@ -23,17 +23,7 @@ import java.security.PrivilegedAction;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.ConcurrentModificationException;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.ServiceLoader;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledFuture;
@@ -458,6 +448,17 @@ public class DruidDataSource extends DruidAbstractDataSource implements DruidDat
                     this.setMaxPoolPreparedStatementPerConnectionSize(value);
                 } catch (NumberFormatException e) {
                     LOG.error("illegal property 'druid.maxPoolPreparedStatementPerConnectionSize'", e);
+                }
+            }
+        }
+        {
+            String property = properties.getProperty("druid.initConnectionSqls");
+            if (property != null && property.length() > 0) {
+                try {
+                    StringTokenizer tokenizer = new StringTokenizer(property, ";");
+                    setConnectionInitSqls(Collections.list(tokenizer));
+                } catch (NumberFormatException e) {
+                    LOG.error("illegal property 'druid.initConnectionSqls'", e);
                 }
             }
         }
@@ -1175,9 +1176,9 @@ public class DruidDataSource extends DruidAbstractDataSource implements DruidDat
             return;
         }
 
-        Class driverTemp = driver.getClass();
-        do {
-            String realDriverClassName = driverTemp.getName();
+
+        for (Class<?> driverClass = driver.getClass();;) {
+            String realDriverClassName = driverClass.getName();
             if (realDriverClassName.equals(JdbcConstants.MYSQL_DRIVER) //
                     || realDriverClassName.equals(JdbcConstants.MYSQL_DRIVER_6)) {
                 this.exceptionSorter = new MySqlExceptionSorter();
@@ -1198,14 +1199,17 @@ public class DruidDataSource extends DruidAbstractDataSource implements DruidDat
                 this.exceptionSorter = new MockExceptionSorter();
             } else if (realDriverClassName.contains("DB2")) {
                 this.exceptionSorter = new DB2ExceptionSorter();
-            } else if (realDriverClassName.equals("com.taobao.tddl.driver")) {
-                this.exceptionSorter = new MySqlExceptionSorter();
-            }
-            if (this.exceptionSorter != null) {
-                break;
-            }
-        } while ( (driverTemp = driverTemp.getSuperclass() ) != Object.class);
 
+            } else {
+                Class<?> superClass = driverClass.getSuperclass();
+                if (superClass != null && superClass != Object.class) {
+                    driverClass = superClass;
+                    continue;
+                }
+            }
+
+            break;
+        }
     }
 
     @Override
@@ -1253,7 +1257,7 @@ public class DruidDataSource extends DruidAbstractDataSource implements DruidDat
             }
 
             if (testOnBorrow) {
-                boolean validate = testConnectionInternal(poolableConnection.conn);
+                boolean validate = testConnectionInternal(poolableConnection.holder, poolableConnection.conn);
                 if (!validate) {
                     if (LOG.isDebugEnabled()) {
                         LOG.debug("skip not validate connection.");
@@ -1284,25 +1288,14 @@ public class DruidDataSource extends DruidAbstractDataSource implements DruidDat
                     if (idleMillis >= timeBetweenEvictionRunsMillis
                             || idleMillis < 0 // unexcepted branch
                             ) {
-                        boolean validate = testConnectionInternal(poolableConnection.conn);
+                        boolean validate = testConnectionInternal(poolableConnection.holder, poolableConnection.conn);
                         if (!validate) {
                             if (LOG.isDebugEnabled()) {
                                 LOG.debug("skip not validate connection.");
                             }
 
                             discardConnection(realConnection);
-                            continue;
-                        }
-
-                        if (JdbcConstants.MYSQL_DRIVER.equals(driverClass)) { // unexcepted branch
-                            long lastPacketReceivedTimeMs = MySqlUtils.getLastPacketReceivedTimeMs(realConnection);
-                            long mysqlIdleMillis = currentTimeMillis - lastPacketReceivedTimeMs;
-                            if (lastPacketReceivedTimeMs > 0 //
-                                    && mysqlIdleMillis >= timeBetweenEvictionRunsMillis) {
-                                discardConnection(realConnection);
-                                LOG.warn("discard long time none received connection. millis : " + mysqlIdleMillis);
-                                continue;
-                            }
+                             continue;
                         }
                     }
                 }
@@ -1576,7 +1569,7 @@ public class DruidDataSource extends DruidAbstractDataSource implements DruidDat
             }
 
             if (testOnReturn) {
-                boolean validate = testConnectionInternal(physicalConnection);
+                boolean validate = testConnectionInternal(holder, physicalConnection);
                 if (!validate) {
                     JdbcUtils.close(physicalConnection);
 

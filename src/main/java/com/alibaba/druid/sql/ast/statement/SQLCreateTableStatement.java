@@ -65,6 +65,8 @@ public class SQLCreateTableStatement extends SQLStatementImpl implements SQLDDLS
     protected final List<SQLSelectOrderByItem> sortedBy = new ArrayList<SQLSelectOrderByItem>();
     protected int                              buckets;
 
+    protected Map<String, SQLObject> tableOptions = new LinkedHashMap<String, SQLObject>();
+
     public SQLCreateTableStatement(){
 
     }
@@ -229,6 +231,10 @@ public class SQLCreateTableStatement extends SQLStatementImpl implements SQLDDLS
         }
 
         this.partitioning = partitioning;
+    }
+
+    public Map<String, SQLObject> getTableOptions() {
+        return tableOptions;
     }
 
     @Override
@@ -1019,6 +1025,13 @@ public class SQLCreateTableStatement extends SQLStatementImpl implements SQLDDLS
 
         x.onCommitPreserveRows = onCommitPreserveRows;
         x.onCommitDeleteRows = onCommitDeleteRows;
+
+        if (tableOptions != null) {
+            for (Map.Entry<String, SQLObject> entry : tableOptions.entrySet()) {
+                SQLObject entryVal = entry.getValue().clone();
+                x.tableOptions.put(entry.getKey(), entryVal);
+            }
+        }
     }
 
     public SQLName getStoredAs() {

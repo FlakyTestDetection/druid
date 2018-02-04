@@ -1,5 +1,5 @@
 /*
- * Copyright 1999-2017 Alibaba Group Holding Ltd.
+ * Copyright 1999-2018 Alibaba Group Holding Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,5 +26,6 @@ public interface DB2Object extends SQLObject {
     interface Constants {
         long CURRENT_DATE = FnvHash.fnv1a_64_lower("CURRENT DATE");
         long CURRENT_TIME = FnvHash.fnv1a_64_lower("CURRENT TIME");
+        long CURRENT_SCHEMA = FnvHash.fnv1a_64_lower("CURRENT SCHEMA");
     }
 }
